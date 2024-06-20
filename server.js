@@ -1,66 +1,39 @@
-import fs from 'node:fs'
-import path from 'node:path'
-import { fileURLToPath } from 'url'
-import express from 'express'
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'url';
+import express from 'express';
+import compression from 'compression';
+import serveStatic from 'serve-static';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const app = express()
+// Static import of the SSRRender function
+import { SSRRender } from './dist/server/entry-server.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const app = express();
 
 export async function createServer(
-  root = process.cwd(),
-  isProd = process.env.NODE_ENV === 'production',
-  hmrPort
 ) {
-  const resolve = (p) => path.resolve(__dirname, p)
-
-  let vite = null
-  if (!isProd) {
-    vite = await (
-      await import('vite')
-    ).createServer({
-      root,
-      logLevel: 'info',
-      server: {
-        middlewareMode: true,
-        hmr: {
-          port: hmrPort
-        }
-      },
-      appType: 'custom'
+  const resolve = (p) => path.resolve(__dirname, p);
+  app.use(compression());
+  app.use(
+    serveStatic(resolve('dist/client'), {
+      index: false
     })
-    app.use(vite.middlewares)
-  } else {
-    app.use((await import('compression')).default())
-    app.use(
-      (await import('serve-static')).default(resolve('dist/client'), {
-        index: false
-      })
-    )
-  }
+  );
 
   app.use('*', async (req, res) => {
-    const url = '/'
-    let template, render
-    if (!isProd && vite) {
-      template = fs.readFileSync(resolve('index.html'), 'utf-8')
-      template = await vite.transformIndexHtml(url, template) // Inserting react-refresh for local development
-      render = (await vite.ssrLoadModule('/src/entry-server.tsx')).SSRRender
-    } else {
-      template = fs.readFileSync(resolve('dist/client/index.html'), 'utf-8')
-      render = (await import('./dist/server/entry-server.js')).SSRRender
-    }
+    const url = '/';
+    const templatePath = resolve('dist/client/index.html');
+    const template = fs.readFileSync(templatePath, 'utf-8');
 
-    const appHtml = render(url) //Rendering component without any client side logic de-hydrated like a dry sponge
-    const html = template.replace(`<!--app-html-->`, appHtml) //Replacing placeholder with SSR rendered components
+    // Use the statically imported SSRRender function
+    const appHtml = SSRRender(url); // No need to await since SSRRender is sync
+    const html = template.replace('<!--app-html-->', appHtml);
 
-    res.status(200).set({ 'Content-Type': 'text/html' }).end(html) //Outputing final html
-  })
-
-  return { app, vite }
-}
-
-createServer().then(({ app }) =>
+    res.status(200).set({ 'Content-Type': 'text/html' }).end(html);
+  });
   app.listen(5173, () => {
-    console.log('http://localhost:5173')
+    console.log('http://localhost:5173');
   })
-)
+}
+createServer();
